@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ShopAxis.Agent")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+19d89911110d0533150a4b15baf5736d38368b5e")]
 [assembly: System.Reflection.AssemblyProductAttribute("ShopAxis.Agent")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ShopAxis.Agent")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
