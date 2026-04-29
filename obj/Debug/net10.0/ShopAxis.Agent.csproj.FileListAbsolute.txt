@@ -41,3 +41,4 @@ C:\Users\AzureAdmin\Desktop\Batch3\ShopAxis.Agent\obj\Debug\net10.0\refint\ShopA
 C:\Users\AzureAdmin\Desktop\Batch3\ShopAxis.Agent\obj\Debug\net10.0\ShopAxis.Agent.pdb
 C:\Users\AzureAdmin\Desktop\Batch3\ShopAxis.Agent\obj\Debug\net10.0\ShopAxis.Agent.genruntimeconfig.cache
 C:\Users\AzureAdmin\Desktop\Batch3\ShopAxis.Agent\obj\Debug\net10.0\ref\ShopAxis.Agent.dll
+C:\Users\AzureAdmin\Desktop\Batch3\ShopAxis.Agent\obj\Debug\net10.0\ShopAxis.Agent.sourcelink.json

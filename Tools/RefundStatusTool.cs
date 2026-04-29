@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 
 public class RefundStatusTool
 {
-    // ── JSON Schema ──────────────────────────────────────────────────────────
     public static readonly string JsonSchema = """
     {
       "type": "object",
@@ -22,7 +21,6 @@ public class RefundStatusTool
     }
     """;
 
-    // Simulated refund pipeline stages in order
     private static readonly string[] RefundStages =
     [
         "return_requested",
@@ -43,7 +41,6 @@ public class RefundStatusTool
         _orderTool  = orderTool;
     }
 
-    // ── Execute ──────────────────────────────────────────────────────────────
     public ToolResult Execute(string returnId, string customerEmail)
     {
         if (!Regex.IsMatch(returnId, @"^RMA-[A-Z0-9]{8}$"))
@@ -54,7 +51,6 @@ public class RefundStatusTool
         if (returnRecord == null)
             return ToolResult.Fail("return_not_found");
 
-        // Ownership check via the linked order
         var order = _orderTool.GetById(returnRecord.OrderId);
 
         if (order == null)
@@ -63,10 +59,13 @@ public class RefundStatusTool
         if (!order.CustomerEmail.Equals(customerEmail, StringComparison.OrdinalIgnoreCase))
             return ToolResult.Fail("email_mismatch");
 
-        // Simulate stage progression based on time since creation
-        var hoursSinceCreated = (DateTime.UtcNow - returnRecord.CreatedUtc).TotalHours;
-        var stageIndex = Math.Min((int)(hoursSinceCreated / 12), RefundStages.Length - 1);
+        // Progress through stages over time — 1 stage per 12 hours
+        var hoursSince = (DateTime.UtcNow - returnRecord.CreatedUtc).TotalHours;
+        var stageIndex = Math.Min((int)(hoursSince / 12), RefundStages.Length - 1);
         var currentStage = RefundStages[stageIndex];
+
+        var daysRemaining = (returnRecord.ExpectedCompletion.DayNumber
+            - DateOnly.FromDateTime(DateTime.UtcNow).DayNumber);
 
         return ToolResult.Ok(new
         {
@@ -76,21 +75,23 @@ public class RefundStatusTool
             refund_amount       = returnRecord.RefundAmount,
             currency            = "GBP",
             expected_completion = returnRecord.ExpectedCompletion.ToString("yyyy-MM-dd"),
+            days_remaining      = Math.Max(0, daysRemaining),
             payment_method      = returnRecord.PaymentMethod,
             items_returning     = returnRecord.ItemSkus,
-            stage_description   = GetStageDescription(currentStage)
+            stage_description   = GetStageDescription(currentStage),
+            progress_percent    = (int)((stageIndex + 1) / (double)RefundStages.Length * 100)
         });
     }
 
     private static string GetStageDescription(string stage) => stage switch
     {
-        "return_requested"  => "Your return has been registered. Please ship the item using your label.",
-        "item_in_transit"   => "We have received your shipment tracking update.",
+        "return_requested"  => "Your return is registered. Please ship using the provided label.",
+        "item_in_transit"   => "We can see your shipment is on its way back to us.",
         "item_received"     => "Your item has arrived at our returns centre.",
         "quality_check"     => "Our team is inspecting the returned item.",
-        "refund_approved"   => "Your refund has been approved.",
-        "refund_processing" => "Your refund is being processed by our payments team.",
-        "refund_issued"     => "Your refund has been issued to your original payment method.",
-        _                   => "Status unknown."
+        "refund_approved"   => "Your refund has been approved and queued for payment.",
+        "refund_processing" => "Your refund is being processed — usually takes 1-2 business days.",
+        "refund_issued"     => "Your refund has been sent to your original payment method.",
+        _                   => "Status unknown — please contact support."
     };
 }

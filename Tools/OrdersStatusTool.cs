@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 
 public class OrderStatusTool
 {
-    // ── JSON Schema ──────────────────────────────────────────────────────────
     public static readonly string JsonSchema = """
     {
       "type": "object",
@@ -23,64 +22,97 @@ public class OrderStatusTool
     }
     """;
 
-    // ── Simulated back-end data fixture ──────────────────────────────────────
-    private readonly Dictionary<string, OrderRecord> _ordersDb = new()
-    {
-        ["ORD-00482917"] = new OrderRecord
-        {
-            OrderId           = "ORD-00482917",
-            CustomerEmail     = "sarah.chen@example.com",
-            Status            = "shipped",
-            Carrier           = "FedEx",
-            TrackingNumber    = "794644792798",
-            EstimatedDelivery = new DateOnly(2025, 8, 12),
-            DeliveryDate      = null,
-            Items =
-            [
-                new OrderItem("SKU-1042", "Wireless Headphones", 1, 89.99m)
-            ]
-        },
-        ["ORD-00391045"] = new OrderRecord
-        {
-            OrderId           = "ORD-00391045",
-            CustomerEmail     = "james.park@example.com",
-            Status            = "delivered",
-            Carrier           = "UPS",
-            TrackingNumber    = "1Z999AA10123456784",
-            EstimatedDelivery = new DateOnly(2025, 7, 28),
-            DeliveryDate      = new DateOnly(2025, 7, 28),
-            Items =
-            [
-                new OrderItem("SKU-2087", "Standing Desk Mat", 1, 45.00m)
-            ]
-        },
-        ["ORD-00512334"] = new OrderRecord
-        {
-            OrderId           = "ORD-00512334",
-            CustomerEmail     = "angry@example.com",
-            Status            = "out_for_delivery",
-            Carrier           = "DHL",
-            TrackingNumber    = "1234567890",
-            EstimatedDelivery = new DateOnly(2025, 8, 10),
-            DeliveryDate      = null,
-            Items =
-            [
-                new OrderItem("SKU-3301", "Mechanical Keyboard", 1, 129.99m)
-            ]
-        }
-    };
+    // ✅ All dates are NOW relative to today — always valid
+    private readonly Dictionary<string, OrderRecord> _ordersDb;
 
-    // ── Execute ──────────────────────────────────────────────────────────────
+    public OrderStatusTool()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        _ordersDb = new Dictionary<string, OrderRecord>
+        {
+            ["ORD-00482917"] = new OrderRecord
+            {
+                OrderId           = "ORD-00482917",
+                CustomerEmail     = "sarah.chen@example.com",
+                Status            = "shipped",
+                Carrier           = "FedEx",
+                TrackingNumber    = "794644792798",
+                EstimatedDelivery = today.AddDays(3),   // arriving in 3 days
+                DeliveryDate      = null,
+                Items             =
+                [
+                    new OrderItem("SKU-1042", "Wireless Headphones", 1, 89.99m)
+                ]
+            },
+            ["ORD-00391045"] = new OrderRecord
+            {
+                OrderId           = "ORD-00391045",
+                CustomerEmail     = "james.park@example.com",
+                Status            = "delivered",
+                Carrier           = "UPS",
+                TrackingNumber    = "1Z999AA10123456784",
+                EstimatedDelivery = today.AddDays(-5),  // estimated was 5 days ago
+                DeliveryDate      = today.AddDays(-5),  // delivered 5 days ago
+                Items             =
+                [
+                    new OrderItem("SKU-2087", "Standing Desk Mat", 1, 45.00m)
+                ]
+            },
+            ["ORD-00512334"] = new OrderRecord
+            {
+                OrderId           = "ORD-00512334",
+                CustomerEmail     = "angry@example.com",
+                Status            = "out_for_delivery",
+                Carrier           = "DHL",
+                TrackingNumber    = "1234567890",
+                EstimatedDelivery = today.AddDays(1),   // arriving tomorrow
+                DeliveryDate      = null,
+                Items             =
+                [
+                    new OrderItem("SKU-3301", "Mechanical Keyboard", 1, 129.99m)
+                ]
+            },
+            ["ORD-00623891"] = new OrderRecord
+            {
+                OrderId           = "ORD-00623891",
+                CustomerEmail     = "mike.ross@example.com",
+                Status            = "processing",
+                Carrier           = "FedEx",
+                TrackingNumber    = "794644792900",
+                EstimatedDelivery = today.AddDays(7),   // arriving in a week
+                DeliveryDate      = null,
+                Items             =
+                [
+                    new OrderItem("SKU-4412", "Ergonomic Chair", 1, 299.99m)
+                ]
+            },
+            ["ORD-00734521"] = new OrderRecord
+            {
+                OrderId           = "ORD-00734521",
+                CustomerEmail     = "lisa.wang@example.com",
+                Status            = "delivered",
+                Carrier           = "UPS",
+                TrackingNumber    = "1Z999AA10987654321",
+                EstimatedDelivery = today.AddDays(-20), // delivered 20 days ago
+                DeliveryDate      = today.AddDays(-20), // within 30-day return window
+                Items             =
+                [
+                    new OrderItem("SKU-5521", "USB-C Hub", 2, 35.00m),
+                    new OrderItem("SKU-5522", "Laptop Stand", 1, 59.99m)
+                ]
+            }
+        };
+    }
+
     public ToolResult Execute(string orderId, string customerEmail)
     {
-        // Format guard (defence-in-depth — schema is primary)
         if (!Regex.IsMatch(orderId, @"^ORD-\d{8}$"))
             return ToolResult.Fail("invalid_order_id_format");
 
         if (!_ordersDb.TryGetValue(orderId, out var order))
             return ToolResult.Fail("order_not_found");
 
-        // Ownership check — never expose PII without verification
         if (!order.CustomerEmail.Equals(customerEmail, StringComparison.OrdinalIgnoreCase))
             return ToolResult.Fail("email_mismatch");
 
@@ -102,7 +134,6 @@ public class OrderStatusTool
         });
     }
 
-    // Expose DB to other tools that need cross-reference
     public OrderRecord? GetById(string orderId) =>
         _ordersDb.TryGetValue(orderId, out var o) ? o : null;
 }

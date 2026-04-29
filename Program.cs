@@ -99,7 +99,8 @@ string DispatchTool(string name, string argsJson)
 }
 
 // ── 6. Conversation runner ────────────────────────────────────────────────
-async Task<string> RunAsync(string userMessage, string sessionId)
+// CHANGED: threadId is passed in so the same thread can be reused for memory
+async Task<string> RunAsync(string userMessage, string sessionId, string threadId)
 {
     var safety = await safetyEval.EvaluateAsync(userMessage);
     if (safety.ShouldSuspend)
@@ -109,88 +110,83 @@ async Task<string> RunAsync(string userMessage, string sessionId)
         userMessage = modded;
     }
 
-    PersistentAgentThread thread = agentsClient.Threads.CreateThread();
+    agentsClient.Messages.CreateMessage(
+        threadId: threadId,
+        role: MessageRole.User,
+        content: userMessage);
 
-    try
+    ThreadRun run = agentsClient.Runs.CreateRun(
+        threadId: threadId,
+        assistantId: agent.Id);
+
+    do
     {
-        agentsClient.Messages.CreateMessage(
-            threadId: thread.Id,
-            role: MessageRole.User,
-            content: userMessage);
+        await Task.Delay(1500);
+        run = agentsClient.Runs.GetRun(threadId, run.Id);
 
-        ThreadRun run = agentsClient.Runs.CreateRun(
-            threadId: thread.Id,
-            assistantId: agent.Id);
-
-        do
+        if (run.Status == RunStatus.RequiresAction &&
+            run.RequiredAction is SubmitToolOutputsAction submitAction)
         {
-            await Task.Delay(1500);
-            run = agentsClient.Runs.GetRun(thread.Id, run.Id);
+            var toolOutputs = new List<ToolOutput>();
 
-            if (run.Status == RunStatus.RequiresAction &&
-                run.RequiredAction is SubmitToolOutputsAction submitAction)
+            foreach (RequiredToolCall call in submitAction.ToolCalls)
             {
-                var toolOutputs = new List<ToolOutput>();
+                if (call is not RequiredFunctionToolCall funcCall)
+                    continue;
 
-                foreach (RequiredToolCall call in submitAction.ToolCalls)
+                var sw = Stopwatch.StartNew();
+                string result = DispatchTool(funcCall.Name, funcCall.Arguments);
+                sw.Stop();
+
+                toolOutputs.Add(new ToolOutput(funcCall.Id, result));
+
+                AuditLogger.LogToolCall(new AuditEntry
                 {
-                    if (call is not RequiredFunctionToolCall funcCall)
-                        continue;
-
-                    var sw = Stopwatch.StartNew();
-                    string result = DispatchTool(funcCall.Name, funcCall.Arguments);
-                    sw.Stop();
-
-                    toolOutputs.Add(new ToolOutput(funcCall.Id, result));
-
-                    AuditLogger.LogToolCall(new AuditEntry
-                    {
-                        SessionId = sessionId,
-                        ThreadId = thread.Id,
-                        RunId = run.Id,
-                        ToolName = funcCall.Name,
-                        Arguments = funcCall.Arguments,
-                        Result = result,
-                        LatencyMs = (int)sw.ElapsedMilliseconds,
-                        TimestampUtc = DateTime.UtcNow
-                    });
-                }
-
-                run = agentsClient.Runs.SubmitToolOutputsToRun(run, toolOutputs);
+                    SessionId = sessionId,
+                    ThreadId = threadId,
+                    RunId = run.Id,
+                    ToolName = funcCall.Name,
+                    Arguments = funcCall.Arguments,
+                    Result = result,
+                    LatencyMs = (int)sw.ElapsedMilliseconds,
+                    TimestampUtc = DateTime.UtcNow
+                });
             }
 
-        } while (run.Status == RunStatus.Queued ||
-                 run.Status == RunStatus.InProgress ||
-                 run.Status == RunStatus.RequiresAction);
-
-        if (run.Status == RunStatus.Failed)
-        {
-            return $"Run failed: {run.LastError?.Code} — {run.LastError?.Message}";
+            run = agentsClient.Runs.SubmitToolOutputsToRun(run, toolOutputs);
         }
+
+    } while (run.Status == RunStatus.Queued ||
+             run.Status == RunStatus.InProgress ||
+             run.Status == RunStatus.RequiresAction);
+
+    if (run.Status == RunStatus.Failed)
+    {
+        return $"Run failed: {run.LastError?.Code} — {run.LastError?.Message}";
+    }
+
+    // CHANGED: get messages in descending order and return only the latest agent reply
+    Pageable<PersistentThreadMessage> messages = agentsClient.Messages.GetMessages(
+        threadId: threadId,
+        order: ListSortOrder.Descending);
+
+    foreach (PersistentThreadMessage msg in messages)
+    {
+        if (msg.Role != MessageRole.Agent)
+            continue;
 
         var responseParts = new List<string>();
 
-        Pageable<PersistentThreadMessage> messages = agentsClient.Messages.GetMessages(
-            threadId: thread.Id,
-            order: ListSortOrder.Ascending);
-
-        foreach (PersistentThreadMessage msg in messages)
+        foreach (MessageContent item in msg.ContentItems)
         {
-            if (msg.Role != MessageRole.Agent) continue;
-
-            foreach (MessageContent item in msg.ContentItems)
-            {
-                if (item is MessageTextContent textItem)
-                    responseParts.Add(textItem.Text);
-            }
+            if (item is MessageTextContent textItem)
+                responseParts.Add(textItem.Text);
         }
 
         return string.Join("\n", responseParts);
     }
-    finally
-    {
-        agentsClient.Threads.DeleteThread(thread.Id);
-    }
+
+    return "No agent response found.";
 }
 
 // ── 7. Interactive console chat ───────────────────────────────────────────
@@ -200,26 +196,39 @@ Console.WriteLine("Type 'exit' to quit.\n");
 string sessionId = Guid.NewGuid().ToString();
 Console.WriteLine($"Session ID: {sessionId}");
 
-while (true)
+// CHANGED: create one thread for the whole session
+PersistentAgentThread thread = agentsClient.Threads.CreateThread();
+Console.WriteLine($"Thread ID: {thread.Id}");
+
+try
 {
-    Console.Write("\nYOU: ");
-    string? userMessage = Console.ReadLine();
-
-    if (string.IsNullOrWhiteSpace(userMessage))
-        continue;
-
-    if (userMessage.Equals("exit", StringComparison.OrdinalIgnoreCase))
-        break;
-
-    try
+    while (true)
     {
-        string response = await RunAsync(userMessage, sessionId);
-        Console.WriteLine($"\nAGENT: {response}\n");
+        Console.Write("\nYOU: ");
+        string? userMessage = Console.ReadLine();
+
+        if (string.IsNullOrWhiteSpace(userMessage))
+            continue;
+
+        if (userMessage.Equals("exit", StringComparison.OrdinalIgnoreCase))
+            break;
+
+        try
+        {
+            // CHANGED: pass thread.Id so the thread is reused
+            string response = await RunAsync(userMessage, sessionId, thread.Id);
+            Console.WriteLine($"\nAGENT: {response}\n");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\nERROR: {ex.Message}\n");
+        }
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"\nERROR: {ex.Message}\n");
-    }
+}
+finally
+{
+    // CHANGED: delete the thread only when the session ends
+    agentsClient.Threads.DeleteThread(thread.Id);
 }
 
 // Optional cleanup

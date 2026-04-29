@@ -50,12 +50,15 @@ public class ReturnInitiationTool
         if (order.DeliveryDate == null)
             return ToolResult.Fail("order_not_yet_delivered");
 
-        // ✅ FIX: Use .DayNumber to subtract DateOnly values
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var daysSince = today.DayNumber - order.DeliveryDate.Value.DayNumber;
 
         if (daysSince > ReturnWindowDays)
-            return ToolResult.Fail($"outside_return_window:{daysSince}_days_since_delivery");
+            return ToolResult.Fail(
+                $"outside_return_window:" +
+                $"delivered={order.DeliveryDate.Value:yyyy-MM-dd}," +
+                $"days_since={daysSince}," +
+                $"window={ReturnWindowDays}_days");
 
         var orderSkus = order.Items.Select(i => i.Sku).ToHashSet();
         var invalidSkus = itemSkus.Where(s => !orderSkus.Contains(s)).ToList();
@@ -67,7 +70,8 @@ public class ReturnInitiationTool
             .Where(i => itemSkus.Contains(i.Sku))
             .Sum(i => i.Price * i.Qty);
 
-        var rmaNumber = ("RMA-" + Guid.NewGuid().ToString("N").ToUpper())[..12];
+        // ✅ Better RMA format: RMA- + 8 uppercase chars
+        var rmaNumber = "RMA-" + Guid.NewGuid().ToString("N").ToUpper()[..8];
         var expectedCompletion = today.AddDays(5);
 
         var record = new ReturnRecord
@@ -93,7 +97,9 @@ public class ReturnInitiationTool
             refund_amount        = refundAmount,
             currency             = "GBP",
             expected_refund_date = expectedCompletion.ToString("yyyy-MM-dd"),
-            items_accepted       = itemSkus
+            items_accepted       = itemSkus,
+            next_steps           = "Print your return label and drop off the package " +
+                                   "at any authorised carrier location within 7 days."
         });
     }
 
