@@ -6,15 +6,8 @@ public class RefundStatusTool
     {
       "type": "object",
       "properties": {
-        "return_id": {
-          "type": "string",
-          "pattern": "^RMA-[A-Z0-9]{8}$",
-          "description": "RMA number from the return initiation step"
-        },
-        "customer_email": {
-          "type": "string",
-          "format": "email"
-        }
+        "return_id":      { "type": "string", "pattern": "^RMA-[A-Z0-9]{8}$" },
+        "customer_email": { "type": "string", "format": "email" }
       },
       "required": ["return_id", "customer_email"],
       "additionalProperties": false
@@ -23,17 +16,12 @@ public class RefundStatusTool
 
     private static readonly string[] RefundStages =
     [
-        "return_requested",
-        "item_in_transit",
-        "item_received",
-        "quality_check",
-        "refund_approved",
-        "refund_processing",
-        "refund_issued"
+        "return_requested", "item_in_transit", "item_received",
+        "quality_check", "refund_approved", "refund_processing", "refund_issued"
     ];
 
     private readonly ReturnInitiationTool _returnTool;
-    private readonly OrderStatusTool _orderTool;
+    private readonly OrderStatusTool      _orderTool;
 
     public RefundStatusTool(ReturnInitiationTool returnTool, OrderStatusTool orderTool)
     {
@@ -59,13 +47,12 @@ public class RefundStatusTool
         if (!order.CustomerEmail.Equals(customerEmail, StringComparison.OrdinalIgnoreCase))
             return ToolResult.Fail("email_mismatch");
 
-        // Progress through stages over time — 1 stage per 12 hours
-        var hoursSince = (DateTime.UtcNow - returnRecord.CreatedUtc).TotalHours;
-        var stageIndex = Math.Min((int)(hoursSince / 12), RefundStages.Length - 1);
+        var hoursSince  = (DateTime.UtcNow - returnRecord.CreatedUtc).TotalHours;
+        var stageIndex  = Math.Min((int)(hoursSince / 12), RefundStages.Length - 1);
         var currentStage = RefundStages[stageIndex];
-
-        var daysRemaining = (returnRecord.ExpectedCompletion.DayNumber
-            - DateOnly.FromDateTime(DateTime.UtcNow).DayNumber);
+        var today       = DateOnly.FromDateTime(DateTime.UtcNow);
+        var daysRemaining = Math.Max(0,
+            returnRecord.ExpectedCompletion.DayNumber - today.DayNumber);
 
         return ToolResult.Ok(new
         {
@@ -75,7 +62,7 @@ public class RefundStatusTool
             refund_amount       = returnRecord.RefundAmount,
             currency            = "GBP",
             expected_completion = returnRecord.ExpectedCompletion.ToString("yyyy-MM-dd"),
-            days_remaining      = Math.Max(0, daysRemaining),
+            days_remaining      = daysRemaining,
             payment_method      = returnRecord.PaymentMethod,
             items_returning     = returnRecord.ItemSkus,
             stage_description   = GetStageDescription(currentStage),
@@ -85,13 +72,13 @@ public class RefundStatusTool
 
     private static string GetStageDescription(string stage) => stage switch
     {
-        "return_requested"  => "Your return is registered. Please ship using the provided label.",
-        "item_in_transit"   => "We can see your shipment is on its way back to us.",
-        "item_received"     => "Your item has arrived at our returns centre.",
+        "return_requested"  => "Return registered. Please ship using the provided label.",
+        "item_in_transit"   => "Shipment is on its way back to us.",
+        "item_received"     => "Item arrived at our returns centre.",
         "quality_check"     => "Our team is inspecting the returned item.",
-        "refund_approved"   => "Your refund has been approved and queued for payment.",
-        "refund_processing" => "Your refund is being processed — usually takes 1-2 business days.",
-        "refund_issued"     => "Your refund has been sent to your original payment method.",
+        "refund_approved"   => "Refund approved and queued for payment.",
+        "refund_processing" => "Refund is being processed — 1-2 business days.",
+        "refund_issued"     => "Refund sent to your original payment method.",
         _                   => "Status unknown — please contact support."
     };
 }

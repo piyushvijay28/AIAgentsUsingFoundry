@@ -5,13 +5,30 @@ using Azure.Core;
 using Azure.Identity;
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
-// ── 1. Wire up tools ──────────────────────────────────────────────────────
-var orderTool = new OrderStatusTool();
-var returnTool = new ReturnInitiationTool(orderTool);
-var rescheduleTool = new DeliveryReschedulingTool(orderTool);
-var refundTool = new RefundStatusTool(returnTool, orderTool);
-var safetyEval = new ContentSafetyEvaluator();
+// ── 0. Database setup ─────────────────────────────────────────────────────
+var connectionString = Environment.GetEnvironmentVariable("SQL_CONNECTION_STRING")
+    ?? throw new InvalidOperationException("Missing SQL_CONNECTION_STRING");
+
+var dbOptions = new DbContextOptionsBuilder<ShopAxisDbContext>()
+    .UseSqlServer(connectionString)
+    .Options;
+
+var db = new ShopAxisDbContext(dbOptions);
+
+// Apply migrations and seed data automatically on startup
+db.Database.Migrate();
+
+// Initialise audit logger with db context
+AuditLogger.Initialize(db);
+
+// ── 1. Wire up tools — pass db into each tool ─────────────────────────────
+var orderTool      = new OrderStatusTool(db);
+var returnTool     = new ReturnInitiationTool(db, orderTool);
+var rescheduleTool = new DeliveryReschedulingTool(db, orderTool);
+var refundTool     = new RefundStatusTool(returnTool, orderTool);
+var safetyEval     = new ContentSafetyEvaluator();
 
 // ── 2. Client setup ───────────────────────────────────────────────────────
 var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")

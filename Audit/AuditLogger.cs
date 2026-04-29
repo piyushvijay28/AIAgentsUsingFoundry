@@ -2,43 +2,39 @@ using System.Text.Json;
 
 public static class AuditLogger
 {
-    private static readonly string LogPath =
-        Path.Combine(AppContext.BaseDirectory, "shopaxis_audit.jsonl");
+    private static ShopAxisDbContext? _db;
+
+    // Call this once from Program.cs after DbContext is created
+    public static void Initialize(ShopAxisDbContext db) => _db = db;
 
     public static void LogToolCall(AuditEntry entry)
     {
-        var line = JsonSerializer.Serialize(new
-        {
-            timestamp_utc = entry.TimestampUtc.ToString("O"),
-            session_id    = entry.SessionId,
-            thread_id     = entry.ThreadId,
-            run_id        = entry.RunId,
-            tool_name     = entry.ToolName,
-            arguments     = JsonDocument.Parse(entry.Arguments).RootElement,
-            result_status = ExtractStatus(entry.Result),
-            latency_ms    = entry.LatencyMs,
-            agent_version = "2.1"
-        });
+        _db?.AuditLog.Add(entry);
+        _db?.SaveChanges();
 
-        File.AppendAllText(LogPath, line + Environment.NewLine);
-        Console.WriteLine($"[AUDIT] {entry.ToolName} → {ExtractStatus(entry.Result)} ({entry.LatencyMs}ms)");
+        // Also keep console output
+        Console.WriteLine(
+            $"[AUDIT] {entry.ToolName} → {ExtractStatus(entry.Result)} ({entry.LatencyMs}ms)");
     }
 
     public static void LogSafetyEvent(string sessionId, string message, SafetyResult safety)
     {
-        var line = JsonSerializer.Serialize(new
+        _db?.AuditLog.Add(new AuditEntry
         {
-            timestamp_utc  = DateTime.UtcNow.ToString("O"),
-            session_id     = sessionId,
-            event_type     = "content_safety_suspension",
-            category       = safety.Category,
-            max_severity   = safety.MaxSeverity,
-            is_frustrated  = safety.IsFrustrated,
-            message_length = message.Length   // never log raw message
+            SessionId    = sessionId,
+            ThreadId     = "",
+            RunId        = "",
+            ToolName     = "content_safety_suspension",
+            Arguments    = $"{{\"category\":\"{safety.Category}\"," +
+                           $"\"severity\":{safety.MaxSeverity}}}",
+            Result       = safety.IsFrustrated ? "frustrated" : "abusive",
+            LatencyMs    = 0,
+            TimestampUtc = DateTime.UtcNow
         });
+        _db?.SaveChanges();
 
-        File.AppendAllText(LogPath, line + Environment.NewLine);
-        Console.WriteLine($"[SAFETY] Flagged — {safety.Category} severity {safety.MaxSeverity}");
+        Console.WriteLine(
+            $"[SAFETY] Flagged — {safety.Category} severity {safety.MaxSeverity}");
     }
 
     private static string ExtractStatus(string resultJson)
