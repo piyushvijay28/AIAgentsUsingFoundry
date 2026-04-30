@@ -125,6 +125,21 @@ async Task<string> RunAsync(string userMessage, string sessionId, string threadI
         AuditLogger.LogSafetyEvent(sessionId, userMessage, safety);
         var (modded, _) = ToneModulator.Modulate(userMessage, safety);
         userMessage = modded;
+    }var (modifiedMessage, shouldProcess) = ToneModulator.Modulate(userMessage, safety);
+
+    if (safety.ShouldSuspend)
+        AuditLogger.LogSafetyEvent(sessionId, userMessage, safety);
+
+    if (!shouldProcess)
+    {
+        var escRef = "ESC-" + Guid.NewGuid().ToString("N").ToUpper()[..8];
+        Console.WriteLine($"[SAFETY] Transaction suspended — {safety.Category} severity {safety.MaxSeverity}");
+        return
+            $"I understand you're having a difficult experience and I genuinely want to help.\n\n" +
+            $"I am connecting you with a member of our senior customer care team who will " +
+            $"personally handle your case and contact you within 2 business hours.\n\n" +
+            $"Your escalation reference is: {escRef}\n\n" +
+            $"Our team will reach out to you shortly to resolve this as quickly as possible.";
     }
 
     agentsClient.Messages.CreateMessage(
